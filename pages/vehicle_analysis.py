@@ -334,7 +334,11 @@ def abnormal_data_view():
                         "异常占比 (%)", format="%.1f%%"
                     ),
                 },
+                hide_index=True,
             )
+
+        with st.expander("📊 核查明细详情", expanded=False):
+            st.dataframe(st.session_state.df, hide_index=True)
 
 
 #  数据导入
@@ -1228,7 +1232,7 @@ def main():
             data_board_view()
             st.markdown("---")
 
-            # 异常占比分析
+            # 异常数据分析
             st.markdown("### 📈 异常数据分析")
             abnormal_data_view()
             st.markdown("---")
