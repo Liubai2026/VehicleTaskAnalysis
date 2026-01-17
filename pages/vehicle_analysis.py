@@ -928,6 +928,143 @@ def display_province_category_analysis():
         group_col = "市"
     else:
         group_col = "省"
+    # ========== 小计平均值分析（在工作时长异常分析前） ==========
+    if "小计" in df.columns:
+        st.markdown("### 💰 平均车辆费用对比分析")
+        st.markdown(
+            f"**筛选条件 - 省份: {selected_province} | 城市: {selected_city} | "
+            f"时间段1: {start_date1} 至 {end_date1} | "
+            f"时间段2: {start_date2} 至 {end_date2}**"
+        )
+
+        # 筛选小计不为0的数据
+        valid_df1 = filtered_df[filtered_df["小计"] != 0].copy()
+
+        # 时间段1的小计平均值按省市分组
+        if not valid_df1.empty:
+            period1_stats = (
+                valid_df1.groupby([group_col, "日期"])["小计"].mean().reset_index()
+            )
+
+            # 按省市汇总平均值
+            period1_summary = (
+                period1_stats.groupby(group_col)["小计"].mean().reset_index()
+            )
+            period1_summary.columns = [group_col, "时间段1小计平均值"]
+
+            # 创建时间段1的折线图
+            fig1 = go.Figure()
+            fig1.add_trace(
+                go.Scatter(
+                    x=period1_summary[group_col],
+                    y=period1_summary["时间段1小计平均值"],
+                    mode="lines+markers+text",
+                    name=f"时间段1 ({start_date1} 至 {end_date1})",
+                    line=dict(color="#636EFA", width=3, shape="spline", smoothing=1.3),
+                    marker=dict(size=8, color="#636EFA"),
+                    text=period1_summary["时间段1小计平均值"].round(2),
+                    textposition="top center",
+                    textfont=dict(size=10),
+                )
+            )
+            fig1.update_layout(
+                title=f"时间段1 ({start_date1} 至 {end_date1}) 小计平均值",
+                xaxis_title="地区",
+                yaxis_title="小计平均值",
+                xaxis_tickangle=-45,
+                height=400,
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                hovermode="x unified",
+            )
+
+        # 时间段2的小计平均值
+        if apply_period2 and len(filtered_df2) > 0:
+            valid_df2 = filtered_df2[filtered_df2["小计"] != 0].copy()
+
+            if not valid_df2.empty:
+                period2_stats = (
+                    valid_df2.groupby([group_col, "日期"])["小计"].mean().reset_index()
+                )
+                period2_summary = (
+                    period2_stats.groupby(group_col)["小计"].mean().reset_index()
+                )
+                period2_summary.columns = [group_col, "时间段2小计平均值"]
+
+                # 合并两个时间段的数据
+                combined_summary = pd.merge(
+                    period1_summary, period2_summary, on=group_col, how="outer"
+                ).fillna(0)
+                # 创建双折线图对比
+                fig_combined = go.Figure()
+
+                fig_combined.add_trace(
+                    go.Scatter(
+                        x=combined_summary[group_col],
+                        y=combined_summary["时间段1小计平均值"],
+                        mode="lines+markers+text",
+                        name=f"时间段1 ({start_date1} 至 {end_date1})",
+                        line=dict(
+                            color="#636EFA", width=3, shape="spline", smoothing=1.3
+                        ),
+                        marker=dict(size=8, color="#636EFA"),
+                        text=combined_summary["时间段1小计平均值"].round(2),
+                        textposition="top center",
+                        textfont=dict(size=10),
+                    )
+                )
+
+                fig_combined.add_trace(
+                    go.Scatter(
+                        x=combined_summary[group_col],
+                        y=combined_summary["时间段2小计平均值"],
+                        mode="lines+markers+text",
+                        name=f"时间段2 ({start_date2} 至 {end_date2})",
+                        line=dict(
+                            color="#EF553B", width=3, shape="spline", smoothing=1.3
+                        ),
+                        marker=dict(size=8, color="#EF553B"),
+                        text=combined_summary["时间段2小计平均值"].round(2),
+                        textposition="top center",
+                        textfont=dict(size=10),
+                    )
+                )
+
+                fig_combined.update_layout(
+                    title="📊 平均车辆费用对比分析",
+                    xaxis_title="地区",
+                    yaxis_title="小计平均值",
+                    xaxis_tickangle=-45,
+                    height=500,
+                    plot_bgcolor="white",
+                    paper_bgcolor="white",
+                    hovermode="x unified",
+                    legend=dict(
+                        yanchor="top", y=-0.25, xanchor="center", x=0.5, orientation="h"
+                    ),
+                )
+
+                st.plotly_chart(fig_combined, use_container_width=True)
+
+            else:
+                st.info("时间段2无有效数据")
+        else:
+            # 只显示时间段1的图表
+            if not valid_df1.empty:
+                st.plotly_chart(fig1, use_container_width=True)
+            else:
+                st.info("时间段1无有效数据")
+
+        # 显示汇总数据表
+        with st.expander("📋 小计平均值汇总数据", expanded=False):
+            if apply_period2 and len(filtered_df2) > 0 and not valid_df2.empty:
+                st.dataframe(
+                    combined_summary, use_container_width=True, hide_index=True
+                )
+            elif not valid_df1.empty:
+                st.dataframe(period1_summary, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
 
     # 创建4个图表，每个核查项一个
     for check_col in available_checks:
@@ -1238,7 +1375,7 @@ def main():
             st.markdown("---")
 
             # 部门维度分析（合并到数据总览后面）
-            st.markdown("### 🔍 详细分析分析")
+            st.markdown("### 🔍 详细分析")
             display_province_category_analysis()
         else:
             st.info("请先导入数据以查看分析结果")

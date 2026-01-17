@@ -50,10 +50,28 @@ def process_vehicle_attendance(
     return df
 
 
-def process_task_progress(task_file: str) -> pd.DataFrame:
+def process_task_progress(task_file: str, employee_file: str = None) -> pd.DataFrame:
     """处理任务进展，任务状态作为列名"""
     df = pd.read_excel(task_file, header=0, engine="calamine", parse_dates=["工单日期"])
     df = df[df["工单类别"] != "后台工单"]
+
+    # 如果提供了employee_file，使用映射添加责任人姓名
+    if employee_file:
+        df2 = pd.read_excel(employee_file, header=0, engine="calamine")
+        df2 = df2[["*资源姓名", "Uniportal账号", "*ID编码"]]
+        df2 = df2.rename(
+            columns={"*资源姓名": "资源姓名", "*ID编码": "ID编码"}
+        ).drop_duplicates()
+
+        # 清理账号列
+        df["责任人账号"] = df["责任人账号"].astype(str).str.strip()
+        df2["Uniportal账号"] = df2["Uniportal账号"].astype(str).str.strip()
+
+        # 创建映射：Uniportal账号 -> 资源姓名
+        id_mapping = df2.set_index("Uniportal账号")["资源姓名"].to_dict()
+
+        # 将所有资源姓名映射到责任人姓名列（完全替换）
+        df["责任人姓名"] = df["责任人账号"].map(id_mapping)
 
     status_mapping = {
         "测试中": "待执行",
@@ -77,17 +95,38 @@ def process_task_progress(task_file: str) -> pd.DataFrame:
     df["任务进展"] = df["任务状态"].map(status_mapping).fillna("未知")
     df["工单日期"] = pd.to_datetime(df["工单日期"]).dt.date.astype(str)
 
-    # 任务进展作为列名
+    # 任务进展作为列名 - 使用原始列名
     result = df.pivot_table(
-        index=["责任人账号", "责任人姓名", "工单日期"],
+        index=[
+            "省份",
+            "地市",
+            "责任人账号",
+            "责任人姓名",
+            "工单日期",
+        ],
         columns="任务进展",
         aggfunc="size",
         fill_value=0,
     ).reset_index()
     result.columns.name = None
 
-    # 清理账号列
-    result["责任人账号"] = result["责任人账号"].astype(str).str.strip()
+    # 修改多个列名
+    result = result.rename(
+        columns={
+            "省份": "省",
+            "地市": "市",
+            "工单日期": "日期",
+            "责任人账号": "Uniportal账号",
+            "责任人姓名": "上传人姓名",
+        }
+    )
+
+    # 确保所有状态列都存在
+    for status in ["待执行", "完成", "通过", "未知"]:
+        if status not in result.columns:
+            result[status] = 0
+    # 清理账号列 - 使用新的列名
+    result["Uniportal账号"] = result["Uniportal账号"].astype(str).str.strip()
 
     return result
 
@@ -99,10 +138,10 @@ def merge_vehicle_with_tasks(
 
     # 确保账号类型一致
     vehicle_df["Uniportal账号"] = vehicle_df["Uniportal账号"].astype(str).str.strip()
-    task_df["责任人账号"] = task_df["责任人账号"].astype(str).str.strip()
+    task_df["Uniportal账号"] = task_df["Uniportal账号"].astype(str).str.strip()
 
     # 创建复合键映射（账号 + 日期）
-    task_df["复合键"] = task_df["责任人账号"] + "_" + task_df["工单日期"].astype(str)
+    task_df["复合键"] = task_df["Uniportal账号"] + "_" + task_df["日期"].astype(str)
     vehicle_df["复合键"] = (
         vehicle_df["Uniportal账号"] + "_" + vehicle_df["日期"].astype(str)
     )
@@ -147,9 +186,9 @@ if __name__ == "__main__":
     print("2. 处理车辆出勤记录...")
     vehicle_df = process_vehicle_attendance(vehicle_file, personnel_df)
 
-    # 3. 处理任务进展
+    # 3. 处理任务进展（传入employee_file文件路径以获取责任人姓名映射）
     print("3. 处理任务进展...")
-    task_df = process_task_progress(task_file)
+    task_df = process_task_progress(task_file, employee_file)
 
     # 4. 合并车辆和任务数据
     print("4. 合并车辆和任务数据...")

@@ -1,192 +1,245 @@
-# app.py
 import streamlit as st
+import pandas as pd
+from core import (
+    merge_personnel_files,
+    process_vehicle_attendance,
+    process_task_progress,
+    merge_vehicle_with_tasks,
+)
 from components import (
     setup_page,
     create_sidebar_navigation,
-    create_navigation_buttons,
+    create_header,
+    create_info_box,
     create_simple_metric,
+)
+from core.data_services import (
+    DataProcessingService,
+    FilterService,
+    DataValidationService,
+)
+from core.chart_generators import (
+    TaskTrendChartGenerator,
+    GroupedBarChartGenerator,
+    ZeroDaysChartGenerator,
+)
+from components.ui_components import (
+    FilterComponents,
+    ChartComponents,
+    FileUploadComponents,
+    LayoutComponents,
+    DataSummaryComponents,
 )
 
 
+def setup_data_processing_tab():
+    """设置数据处理标签页"""
+    st.markdown("### 📁 数据文件配置")
+    st.markdown("请选择或确认以下数据文件的路径：")
+    st.markdown("---")
+
+    # 文件上传
+    uploaded_files = FileUploadComponents.create_file_uploaders()
+
+    st.markdown("---")
+
+    # 数据处理按钮
+    col_btn1, col_btn2 = st.columns([1, 2])
+    with col_btn1:
+        process_btn = st.button(
+            "🚀 一键处理数据",
+            type="primary",
+            use_container_width=True,
+            help="点击开始处理所有数据文件",
+        )
+
+    # 处理状态和结果
+    if "processed_data" not in st.session_state:
+        st.session_state.processed_data = None
+
+    if process_btn:
+        if not FileUploadComponents.validate_uploaded_files(uploaded_files):
+            return
+
+        with st.spinner("正在处理数据，请稍候..."):
+            try:
+                # 处理数据
+                personnel_df = merge_personnel_files(
+                    uploaded_files["personnel"], uploaded_files["employee"]
+                )
+                vehicle_df = process_vehicle_attendance(
+                    uploaded_files["vehicle"], personnel_df
+                )
+                task_df = process_task_progress(
+                    uploaded_files["task"], uploaded_files["employee"]
+                )
+                final_df = merge_vehicle_with_tasks(vehicle_df, task_df)
+
+                # 保存到session state
+                st.session_state.processed_data = final_df
+                st.session_state.task_data = task_df
+                st.session_state.processing_success = True
+
+                create_info_box(
+                    f"数据处理完成！共处理 {len(final_df)} 条记录。", "success"
+                )
+
+            except Exception as e:
+                st.session_state.processing_success = False
+                create_info_box(f"数据处理失败: {str(e)}", "error")
+
+    # 显示处理结果
+    if st.session_state.processed_data is not None:
+        DataSummaryComponents.display_data_preview(st.session_state.processed_data)
+        DataSummaryComponents.display_basic_metrics(st.session_state.processed_data)
+
+
+def setup_visualization_tab():
+    """设置可视化分析标签页"""
+    if st.session_state.processed_data is None:
+        st.warning(
+            "⚠️ 请先在【数据文件选择】Tab中处理数据，然后切换到此Tab查看可视化结果。"
+        )
+        return
+
+    df = st.session_state.task_data
+
+    # 转换为日期类型
+    if "日期" in df.columns:
+        df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+
+    LayoutComponents.create_section_header("数据分析面板", "车辆出勤与工单履行率分析")
+
+    # 趋势分析部分
+    LayoutComponents.create_section_header(
+        "任务进展趋势分析", "显示全部数据的任务状态按日期变化趋势", "📈"
+    )
+
+    # 创建筛选器
+    filters = FilterComponents.create_trend_filters(df)
+
+    # 处理筛选数据
+    trend_df = DataProcessingService.process_trend_data(df, filters)
+
+    if DataValidationService.check_empty_data(trend_df):
+        st.warning("没有符合条件的数据")
+        return
+
+    # 显示趋势图表
+    trend_fig = TaskTrendChartGenerator.create_trend_chart(
+        trend_df, "日期", "📈 平均人效（完成+通过）"
+    )
+    ChartComponents.display_trend_chart(trend_fig)
+
+    # 显示趋势数据汇总
+    trend_summary = DataProcessingService.get_trend_summary(trend_df)
+    ChartComponents.display_dataframe(trend_summary, "📋 趋势数据汇总")
+
+    # 上传人平均值分析
+    LayoutComponents.create_section_header(
+        "平均人效分析", "按上传人统计任务完成情况", "📊"
+    )
+
+    uploader_stats = DataProcessingService.calculate_uploader_stats(
+        trend_df, filters.get("top_n", 10)
+    )
+    if not uploader_stats.empty:
+        uploader_fig = TaskTrendChartGenerator.create_uploader_bar_chart(
+            uploader_stats, "📊 平均人效（完成+通过）"
+        )
+        ChartComponents.display_trend_chart(uploader_fig)
+        ChartComponents.display_dataframe(uploader_stats, "📋 工程师平均人效数据")
+
+    # 城市趋势分析
+    LayoutComponents.create_section_header(
+        "城市趋势分析", "各城市任务完成情况趋势", "🏙️"
+    )
+
+    city_trends = DataProcessingService.calculate_city_trends(trend_df)
+    if not city_trends.empty:
+        city_fig = TaskTrendChartGenerator.create_trend_chart(
+            trend_df, "日期", "📊 平均人效（完成+通过）（按城市）"
+        )
+        ChartComponents.display_trend_chart(city_fig)
+        ChartComponents.display_dataframe(city_trends, "📋 各城市平均值数据")
+
+    # 分组统计分析
+    LayoutComponents.create_section_header(
+        "分组统计分析", "按省、市统计各任务状态的数量", "📊"
+    )
+
+    group_filters = FilterComponents.create_simple_filters(
+        df, ["province", "city"], "group"
+    )
+    group_df = DataProcessingService.process_trend_data(df, group_filters)
+
+    group_cols = []
+    if group_filters.get("province") and group_filters["province"] != "全部":
+        group_cols.append("省")
+    if group_filters.get("city") and group_filters["city"] != "全部":
+        group_cols.append("市")
+
+    if group_cols:
+        group_fig, error = GroupedBarChartGenerator.create_grouped_bar_chart(
+            group_df, group_cols, "📊 数据统计分组柱状图"
+        )
+        if group_fig:
+            ChartComponents.display_trend_chart(group_fig)
+            group_summary = group_df.groupby(group_cols)[
+                ["待执行", "完成", "通过", "未知"]
+            ].sum()
+            ChartComponents.display_dataframe(group_summary, "📋 分组数据汇总")
+        else:
+            st.error(error)
+
+    # 零任务天数分析
+    LayoutComponents.create_section_header(
+        "零任务天数分析", "按省、市统计任务完成度为零的天数", "⚠️"
+    )
+
+    zero_filters = FilterComponents.create_simple_filters(
+        df, ["province", "city", "date_range"], "zero"
+    )
+    zero_df = DataProcessingService.process_trend_data(df, zero_filters)
+
+    zero_group_cols = []
+    if zero_filters.get("province") and zero_filters["province"] != "全部":
+        zero_group_cols.append("省")
+    if zero_filters.get("city") and zero_filters["city"] != "全部":
+        zero_group_cols.append("市")
+
+    if zero_group_cols:
+        zero_fig, error = ZeroDaysChartGenerator.create_zero_days_chart(
+            zero_df, zero_group_cols, "⚠️ 任务完成度为零的天数统计"
+        )
+        if zero_fig:
+            ChartComponents.display_trend_chart(zero_fig)
+            # 显示零任务天数汇总数据
+            zero_summary = zero_df.groupby(zero_group_cols)[
+                "待执行", "完成", "通过"
+            ].sum()
+            ChartComponents.display_dataframe(zero_summary, "📋 零任务天数汇总")
+        else:
+            st.error(error)
+
+
 def main():
-    """主页面 - 完全使用 Streamlit 原生组件"""
-    # 检查是否需要返回首页
-    if st.session_state.get("return_to_home", False):
-        st.session_state.return_to_home = False
-        st.rerun()  # 确保页面完全刷新
-
+    """主应用"""
     # 页面设置
-    setup_page("内控管理分析系统")
-    # 使用组件中的侧边栏导航
+    setup_page("工单分析")
     create_sidebar_navigation()
+    create_header("工单分析", "车辆出勤与工单履行率分析", "📋")
 
-    # 页面头部
-    st.markdown("# 内控管理分析系统")
-    st.markdown("*数据驱动的车辆管理与工单分析平台*")
-    st.markdown("---")
+    # 创建标签页
+    tabs = LayoutComponents.create_tabs(["数据文件选择", "数据可视化分析"])
 
-    # 欢迎信息
-    st.markdown(
-        """
-    ## 🎯 欢迎使用内控管理分析系统
-    
-    本系统提供专业的车辆出勤数据分析和工单管理功能，帮助您实现高效的内控管理。
-    """
-    )
+    # 数据处理标签页
+    with tabs["数据文件选择"]:
+        setup_data_processing_tab()
 
-    # 功能特性
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("### 🚗 车辆分析功能")
-        st.markdown(
-            """
-        - **智能数据核查**：自动检查数据完整性和准确性
-        - **异常检测**：识别异常出勤记录和费用
-        - **多维分析**：按时间、地区、车辆等多维度分析
-        - **可视化报告**：生成直观的数据图表和报告
-        - **数据导出**：支持多种格式的数据导出
-        """
-        )
-
-    with col2:
-        st.markdown("### 📋 工单分析功能")
-        st.markdown(
-            """
-        - **数据整合**：合并车辆出勤和工单数据
-        - **任务跟踪**：实时监控工单完成状态
-        - **绩效评估**：分析员工工作效率和质量
-        - **智能匹配**：自动匹配车辆和工单记录
-        - **统计分析**：生成工单完成率分析报告
-        """
-        )
-
-    st.markdown("---")
-
-    # 快速导航
-    create_navigation_buttons()
-
-    st.markdown("---")
-
-    # 使用指南
-    with st.expander("📖 使用指南", expanded=True):
-        tab1, tab2, tab3 = st.tabs(["车辆分析", "工单分析", "系统设置"])
-
-        with tab1:
-            st.markdown(
-                """
-            ### 🚗 车辆分析使用步骤：
-            
-            1. **准备数据**
-               - 准备车辆出勤数据Excel文件
-               - 确保数据格式正确（从第2行开始）
-               - 必需列：开始时间、结束时间、车牌号码等
-            
-            2. **导入分析**
-               - 进入【车辆分析】页面
-               - 上传数据文件
-               - 系统自动执行数据核查
-            
-            3. **查看结果**
-               - 查看统计指标和异常分布
-               - 使用筛选功能查看特定数据
-               - 导出分析报告
-            
-            4. **配置参数**
-               - 根据业务需求调整核查阈值
-               - 保存配置后重新导入数据生效
-            """
-            )
-
-        with tab2:
-            st.markdown(
-                """
-            ### 📋 工单分析使用步骤：
-            
-            1. **准备文件**
-               - DTSP人员明细表
-               - IResource人员明细表
-               - 车辆出勤记录表
-               - ISDP工单履行率明细表
-            
-            2. **上传文件**
-               - 进入【工单分析】页面
-               - 依次上传所有必需文件
-               - 确保文件格式正确
-            
-            3. **数据处理**
-               - 点击"一键处理数据"按钮
-               - 系统自动合并和分析数据
-               - 查看匹配率和完成情况
-            
-            4. **分析结果**
-               - 查看工单状态分布
-               - 分析员工工作效率
-               - 导出分析报告
-            """
-            )
-
-        with tab3:
-            st.markdown(
-                """
-            ### ⚙️ 系统设置说明：
-            
-            1. **参数配置**
-               - 工作时间阈值设置
-               - 行驶里程范围设置
-               - 费用上限设置
-            
-            2. **注意事项**
-               - 修改配置后需重新导入数据
-               - 参数应根据实际业务调整
-               - 保存配置后立即生效
-            """
-            )
-
-    # 系统状态
-    st.markdown("---")
-    st.markdown("### 🔧 系统状态")
-
-    status_cols = st.columns(4)
-    with status_cols[0]:
-        create_simple_metric("系统版本", "1.2.0")
-    with status_cols[1]:
-        create_simple_metric("运行状态", "正常")
-    with status_cols[2]:
-        create_simple_metric("数据更新", "实时")
-    with status_cols[3]:
-        create_simple_metric("支持格式", "Excel/CSV")
-
-    # 技术支持
-    st.markdown("---")
-    with st.expander("📞 技术支持", expanded=False):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(
-                """
-                ### 联系方式
-                - **服务热线**: 9090-980
-                """
-            )
-        with col2:
-            st.markdown(
-                """
-                ### 服务时间
-                - 抽时间支持
-                """
-            )
-
-    # 底部信息
-    st.markdown("---")
-    st.markdown(
-        """
-    <div style="text-align: center; color: #666; padding: 20px;">
-        <p>© 2024 内控管理分析系统 | 版本 1.2.0</p>
-        <p>技术支持: support@example.com | 服务热线: 9090-980</p>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
+    # 可视化分析标签页
+    with tabs["数据可视化分析"]:
+        setup_visualization_tab()
 
 
 if __name__ == "__main__":
