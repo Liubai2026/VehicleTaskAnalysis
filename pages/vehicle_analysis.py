@@ -221,7 +221,7 @@ def abnormal_data_view():
     # 获取总的记录数
     total_records = len(df)
 
-    # 创建异常占比数据表
+    # 创建异常数量数据表
     abnormal_data = []
 
     if "工作时长核查" in stats:
@@ -284,13 +284,13 @@ def abnormal_data_view():
         abnormal_df = pd.DataFrame(abnormal_data)
         abnormal_df = abnormal_df.sort_values("异常数量", ascending=False)
 
-        # 创建异常占比柱状图
+        # 创建异常数量柱状图
         fig = go.Figure(
             data=[
                 go.Bar(
                     x=abnormal_df["核查项目"],
                     y=abnormal_df["异常数量"],
-                    text=[f"{num}%" for num in abnormal_df["异常数量"]],
+                    text=[str(num) for num in abnormal_df["异常数量"]],
                     textposition="outside",
                     marker_color=px.colors.qualitative.Set3[: len(abnormal_df)],
                     hovertemplate="%{y}",
@@ -300,18 +300,18 @@ def abnormal_data_view():
 
         fig.update_layout(
             title=dict(
-                text="各项核查异常占比对比",
+                text="各项核查异常数量",
                 font=dict(size=16, color="#1E293B"),
                 x=0.5,
                 xanchor="center",
             ),
             xaxis=dict(title="核查项目", tickfont=dict(size=12)),
             yaxis=dict(
-                title="异常占比 (%)",
+                title="异常数量",
                 gridcolor="lightgray",
                 range=[
                     0,
-                    max(abnormal_df["异常占比"]) * 1.5 if len(abnormal_df) > 0 else 100,
+                    max(abnormal_df["异常数量"]) * 1.5 if len(abnormal_df) > 0 else 100,
                 ],
             ),
             plot_bgcolor="white",
@@ -499,6 +499,252 @@ def display_province_category_analysis1():
             st.plotly_chart(fig, use_container_width=True)
 
 
+def compare_abnormal_types(df1, df2, start1, end1, start2, end2):
+    """对比两个时间段的异常类型分布"""
+    # 获取两个时间段的异常统计数据
+    stats1 = {
+        "工作时长": (df1["工作时长核查"] != "正常").sum(),
+        "公里数": (df1["公里数核查"] != "正常").sum(),
+        "路桥费": (df1["路桥费核查"] != "正常").sum(),
+        "加班费": (df1["加班费核查"] != "正常").sum(),
+    }
+
+    stats2 = {
+        "工作时长": (df2["工作时长核查"] != "normal").sum(),
+        "公里数": (df2["公里数核查"] != "normal").sum(),
+        "路桥费": (df2["路桥费核查"] != "normal").sum(),
+        "加班费": (df2["加班费核查"] != "normal").sum(),
+    }
+
+    # 创建对比图表
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=list(stats1.keys()),
+            y=list(stats1.values()),
+            name=f"{start1}至{end1}",
+            marker_color="#636EFA",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=list(stats2.keys()),
+            y=list(stats2.values()),
+            name=f"{start2}至{end2}",
+            marker_color="#EF553B",
+        )
+    )
+
+    fig.update_layout(
+        title="异常类型对比",
+        xaxis_title="异常类型",
+        yaxis_title="异常数量",
+        barmode="group",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def create_province_comparison_chart(df1, df2, start1, end1, start2, end2):
+    """创建省份对比图表"""
+    if "省" not in df1.columns or "省" not in df2.columns:
+        return None
+
+    # 使用更简洁的方法计算异常数量
+    prov_stats = (
+        df1[df1["异常数量"] > 0]
+        .groupby("省")
+        .size()
+        .reset_index(name=f"{start1}_{end1}")
+        .merge(
+            df2[df2["异常数量"] > 0]
+            .groupby("省")
+            .size()
+            .reset_index(name=f"{start2}_{end2}"),
+            on="省",
+            how="outer",
+        )
+        .fillna(0)
+    )
+
+    # 使用更简洁的图表创建方式
+    fig = px.bar(
+        prov_stats.melt(id_vars="省", var_name="时间段", value_name="异常数量"),
+        x="省",
+        y="异常数量",
+        color="时间段",
+        barmode="group",
+        title="各省份异常数量对比",
+        labels={"异常数量": "异常数量", "省": "省份"},
+        color_discrete_map={
+            f"{start1}_{end1}": "#636EFA",
+            f"{start2}_{end2}": "#EF553B",
+        },
+    )
+
+    fig.update_layout(
+        plot_bgcolor="white", paper_bgcolor="white", xaxis_tickangle=-45, height=400
+    )
+
+    return fig
+
+
+def create_abnormal_type_comparison_chart(df1, df2, start1, end1, start2, end2):
+    """创建异常类型对比图表"""
+    # 定义检查项目
+    check_items = ["工作时长", "公里数", "路桥费", "加班费"]
+    check_columns = [f"{item}核查" for item in check_items]
+
+    # 使用列表推导式计算异常统计数据
+    stats1 = {
+        item: (df1[col] != "正常").sum()
+        for item, col in zip(check_items, check_columns)
+        if col in df1.columns
+    }
+
+    stats2 = {
+        item: (df2[col] != "正常").sum()
+        for item, col in zip(check_items, check_columns)
+        if col in df2.columns
+    }
+
+    # 创建数据框用于绘图
+    comparison_data = []
+    for item in stats1.keys():
+        comparison_data.append(
+            {"异常类型": item, "异常数量": stats1[item], "时间段": f"{start1}至{end1}"}
+        )
+        comparison_data.append(
+            {"异常类型": item, "异常数量": stats2[item], "时间段": f"{start2}至{end2}"}
+        )
+
+    if not comparison_data:
+        return None
+
+    comparison_df = pd.DataFrame(comparison_data)
+
+    # 使用简洁的Plotly Express创建图表
+    fig = px.bar(
+        comparison_df,
+        x="异常类型",
+        y="异常数量",
+        color="时间段",
+        barmode="group",
+        title="异常类型对比",
+        labels={"异常数量": "异常数量", "异常类型": "异常类型"},
+        color_discrete_map={
+            f"{start1}至{end1}": "#636EFA",
+            f"{start2}至{end2}": "#EF553B",
+        },
+    )
+
+    fig.update_layout(plot_bgcolor="white", paper_bgcolor="white", height=400)
+
+    return fig
+
+
+def create_category_bar_chart(
+    abnormal_df,
+    check_col,
+    group_col,
+    chart_title,
+    selected_province,
+    selected_city,
+    selected_date,
+):
+    """创建异常类别的分组柱状图"""
+    # 按省份和异常类别分组统计
+    category_stats = (
+        abnormal_df.groupby([group_col, check_col]).size().reset_index(name="数量")
+    )
+
+    # 获取所有异常类别
+    categories = abnormal_df[check_col].unique()
+
+    # 如果类别太多，可以合并其他类别
+    if len(categories) > 10:
+        main_categories = categories[:8]
+        other_df = abnormal_df[~abnormal_df[check_col].isin(main_categories)]
+        if len(other_df) > 0:
+            categories = list(main_categories) + ["其他"]
+            other_df = other_df.copy()
+            other_df[check_col] = "其他"
+            abnormal_df = pd.concat(
+                [
+                    abnormal_df[abnormal_df[check_col].isin(main_categories)],
+                    other_df,
+                ]
+            )
+            category_stats = (
+                abnormal_df.groupby([group_col, check_col])
+                .size()
+                .reset_index(name="数量")
+            )
+
+    # 创建分组柱状图
+    fig = go.Figure()
+
+    # 为每个异常类别添加一个柱状图系列
+    colors = px.colors.qualitative.Set3[: len(categories)]
+
+    for i, category in enumerate(categories):
+        category_data = category_stats[category_stats[check_col] == category]
+
+        # 如果没有数据，跳过
+        if len(category_data) == 0:
+            continue
+
+        fig.add_trace(
+            go.Bar(
+                name=category,
+                x=category_data[group_col],
+                y=category_data["数量"],
+                text=category_data["数量"],
+                textposition="auto",
+                marker_color=colors[i],
+                hovertemplate=f"{group_col}: %{{x}}<br>类别: {category}<br>数量: %{{y}}条<extra></extra>",
+            )
+        )
+
+    # 设置图表标题，包含筛选条件
+    title_parts = [f"{chart_title}异常分布"]
+    if selected_province != "全部":
+        title_parts.append(f"省份: {selected_province}")
+    if selected_city != "全部":
+        title_parts.append(f"城市: {selected_city}")
+    if selected_date:
+        title_parts.append(f"日期: {selected_date}")
+
+    fig.update_layout(
+        title=dict(
+            text=" | ".join(title_parts),
+            font=dict(size=14, color="#1E293B"),
+            x=0.5,
+            xanchor="center",
+        ),
+        xaxis=dict(
+            title=group_col, tickangle=-45, tickfont=dict(size=11), showgrid=False
+        ),
+        yaxis=dict(title="异常数量", gridcolor="rgba(211, 211, 211, 0.5)", gridwidth=1),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=400,
+        margin=dict(l=50, r=50, t=80, b=120),
+        barmode="group",
+        legend=dict(
+            yanchor="top",
+            y=-0.3,
+            xanchor="center",
+            x=0.5,
+            orientation="h",
+            font=dict(size=10),
+        ),
+        showlegend=True,
+    )
+    return fig
+
+
 def display_province_category_analysis():
     """显示按省份和异常类别的分析"""
     df = st.session_state.df
@@ -532,7 +778,7 @@ def display_province_category_analysis():
             city_col = col
             break
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         # 获取所有省份
         all_provinces = df["省"].dropna().unique().tolist()
@@ -557,34 +803,85 @@ def display_province_category_analysis():
             # 获取最小和最大日期
             min_date = df["日期"].min().date()
             max_date = df["日期"].max().date()
-            selected_date = st.date_input(
-                label="📆 选择日期",
-                value=None,  # 默认为空，表示选择全部
+
+            # 时间段1选择器
+            date_range1 = st.date_input(
+                "选择时间段1",
+                value=(min_date, max_date),
                 min_value=min_date,
                 max_value=max_date,
-                format="YYYY-MM-DD",
+                key="date_range1",
             )
+
+            if len(date_range1) == 2:
+                start_date1, end_date1 = date_range1
+            else:
+                start_date1, end_date1 = min_date, max_date
         else:
             st.info("数据中没有日期列")
-            selected_date = None
+            start_date1, end_date1 = None, None
+
+    with col4:
+        # 时间段2选择器
+        if "日期" in df.columns:
+            date_range2 = st.date_input(
+                "选择时间段2",
+                value=(min_date, max_date),
+                min_value=min_date,
+                max_value=max_date,
+                key="date_range2",
+            )
+
+            if len(date_range2) == 2:
+                start_date2, end_date2 = date_range2
+            else:
+                start_date2, end_date2 = min_date, max_date
+        else:
+            st.info("数据中没有日期列")
+            start_date2, end_date2 = None, None
+
+    # 单独一行显示时间段2应用开关
+    apply_period2 = st.checkbox(
+        "📊 应用时间段2数据进行对比分析",
+        key="apply_period2",
+        help="勾选后将使用时间段2数据进行对比分析",
+    )
 
     # 根据选择的条件筛选数据
     filtered_df = df.copy()
+    filtered_df2 = df.copy()
 
     # 省份筛选
     if selected_province != "全部":
         filtered_df = filtered_df[filtered_df["省"] == selected_province]
+        filtered_df2 = filtered_df2[filtered_df2["省"] == selected_province]
 
     # 城市筛选
     if selected_city != "全部":
         filtered_df = filtered_df[filtered_df["市"] == selected_city]
+        filtered_df2 = filtered_df2[filtered_df2["市"] == selected_city]
 
-    # 日期筛选
-    if selected_date and "日期" in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df["日期"].dt.date == selected_date]
+    # 日期筛选 - 时间段1
+    if start_date1 and end_date1 and "日期" in filtered_df.columns:
+        filtered_df = filtered_df[
+            (filtered_df["日期"].dt.date >= start_date1)
+            & (filtered_df["日期"].dt.date <= end_date1)
+        ]
 
+    # 日期筛选 - 时间段2（如果启用）
+    if apply_period2 and start_date2 and end_date2 and "日期" in filtered_df2.columns:
+        filtered_df2 = filtered_df2[
+            (filtered_df2["日期"].dt.date >= start_date2)
+            & (filtered_df2["日期"].dt.date <= end_date2)
+        ]
+    elif apply_period2:
+        filtered_df2 = pd.DataFrame()  # 如果没有时间段2数据，设置为空
+
+    # 显示筛选结果统计
     if selected_province == "全部" and selected_city == "全部":
-        st.info(f"📈 当前: {len(filtered_df)} 条记录。")
+        st.info(f"📈 时间段1: {len(filtered_df)} 条记录。")
+        if apply_period2:
+            st.info(f"📈 时间段2: {len(filtered_df2)} 条记录。")
     else:
         # 筛选出4列都不为"正常"的数据
         condition = (
@@ -594,18 +891,39 @@ def display_province_category_analysis():
             | (filtered_df["加班费核查"] != "正常")
         )
         abnormal_all_df = filtered_df[condition].copy()
+
         # 显示筛选后的数据统计
         st.info(
-            f"📈 当前筛选结果: {len(filtered_df)} 条记录，异常记录{len(abnormal_all_df)}条。"
+            f"📈 时间段1: {len(filtered_df)} 条记录，异常记录{len(abnormal_all_df)}条。"
         )
+
+        if apply_period2:
+            condition2 = (
+                (filtered_df2["工作时长核查"] != "正常")
+                | (filtered_df2["公里数核查"] != "正常")
+                | (filtered_df2["路桥费核查"] != "正常")
+                | (filtered_df2["加班费核查"] != "正常")
+            )
+            abnormal_all_df2 = filtered_df2[condition2].copy()
+            st.info(
+                f"📈 时间段2: {len(filtered_df2)} 条记录，异常记录{len(abnormal_all_df2)}条。"
+            )
 
         with st.expander("异常记录详情", expanded=False):
             st.dataframe(abnormal_all_df, hide_index=True)
 
     # 如果没有数据，显示提示
     if len(filtered_df) == 0:
-        st.warning("没有找到符合条件的记录")
+        st.warning("没有找到时间段1符合条件的记录")
         return
+
+    # 确定分组列
+    if selected_city != "全部":
+        group_col = "市"
+    elif selected_province != "全部":
+        group_col = "市"
+    else:
+        group_col = "省"
 
     # 创建4个图表，每个核查项一个
     for check_col in available_checks:
@@ -614,150 +932,251 @@ def display_province_category_analysis():
         # 创建子标题
         st.markdown(f"### 📊 {chart_title}异常分析")
 
-        # 筛选异常数据
-        abnormal_df = filtered_df[filtered_df[check_col] != "正常"].copy()
-
-        if abnormal_df.empty:
-            st.write(f"✅ 当前筛选条件下没有{chart_title}异常记录")
-            st.divider()
-            continue
-
-        # 按省份和异常类别分组统计
-        if selected_city != "全部":
-            # 如果选择了具体城市，按城市分组
-            group_col = "市"
-        elif selected_province != "全部":
-            # 如果选择了具体省份，按城市分组
-            group_col = "市"
-        else:
-            # 如果选择"全部"，按省份分组
-            group_col = "省"
-
-        category_stats = (
-            abnormal_df.groupby([group_col, check_col]).size().reset_index(name="数量")
-        )
-
-        # 获取所有异常类别
-        categories = abnormal_df[check_col].unique()
-
-        # 如果类别太多，可以合并其他类别
-        if len(categories) > 10:
-            main_categories = categories[:8]
-            other_df = abnormal_df[~abnormal_df[check_col].isin(main_categories)]
-            if len(other_df) > 0:
-                categories = list(main_categories) + ["其他"]
-                other_df = other_df.copy()
-                other_df[check_col] = "其他"
-                abnormal_df = pd.concat(
-                    [
-                        abnormal_df[abnormal_df[check_col].isin(main_categories)],
-                        other_df,
-                    ]
-                )
-                category_stats = (
-                    abnormal_df.groupby([group_col, check_col])
-                    .size()
-                    .reset_index(name="数量")
-                )
-
-        # 创建分组柱状图
-        fig = go.Figure()
-
-        # 为每个异常类别添加一个柱状图系列
-        colors = px.colors.qualitative.Set3[: len(categories)]
-
-        for i, category in enumerate(categories):
-            category_data = category_stats[category_stats[check_col] == category]
-
-            # 如果没有数据，跳过
-            if len(category_data) == 0:
-                continue
-
-            fig.add_trace(
-                go.Bar(
-                    name=category,
-                    x=category_data[group_col],
-                    y=category_data["数量"],
-                    text=category_data["数量"],
-                    textposition="auto",
-                    marker_color=colors[i],
-                    hovertemplate=f"{group_col}: %{{x}}<br>类别: {category}<br>数量: %{{y}}条<extra></extra>",
-                )
+        if apply_period2 and len(filtered_df2) > 0:
+            # ========== 时间段对比模式 ==========
+            st.markdown(
+                f"**时间段1 ({start_date1} 至 {end_date1}) vs 时间段2 ({start_date2} 至 {end_date2})**"
             )
 
-        # 设置图表标题，包含筛选条件
-        title_parts = [f"{chart_title}异常分布"]
-        if selected_province != "全部":
-            title_parts.append(f"省份: {selected_province}")
-        if selected_city != "全部":
-            title_parts.append(f"城市: {selected_city}")
-        if selected_date:
-            title_parts.append(f"日期: {selected_date}")
+            # 筛选两个时间段的异常数据
+            abnormal_df1 = filtered_df[filtered_df[check_col] != "正常"].copy()
+            abnormal_df2 = filtered_df2[filtered_df2[check_col] != "正常"].copy()
 
-        fig.update_layout(
-            title=dict(
-                text=" | ".join(title_parts),
-                font=dict(size=14, color="#1E293B"),
-                x=0.5,
-                xanchor="center",
-            ),
-            xaxis=dict(
-                title=group_col, tickangle=-45, tickfont=dict(size=11), showgrid=False
-            ),
-            yaxis=dict(
-                title="异常数量", gridcolor="rgba(211, 211, 211, 0.5)", gridwidth=1
-            ),
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            height=400,
-            margin=dict(l=50, r=50, t=80, b=120),
-            barmode="group",
-            legend=dict(
-                yanchor="top",
-                y=-0.3,
-                xanchor="center",
-                x=0.5,
-                orientation="h",
-                font=dict(size=10),
-            ),
-            showlegend=True,
-        )
+            # 创建双列布局显示两个时间段
+            col1, col2 = st.columns(2)
 
-        # 显示图表
-        st.plotly_chart(fig, use_container_width=True)
-        default_columns = [
-            "日期",
-            "车牌号码",
-            "驾驶员名称",
-            "路桥费",
-            "停车费",
-            "加班费",
-            # "只打卡不出车",
-            "开始时间",
-            "结束时间",
-            "行驶里程",
-            "开始公里数",
-            "结束公里数",
-            "小计",
-            "上传人姓名",
-            "供应商名称",
-            "省",
-            "市",
-            "一级项目名称",
-            "二级项目名称",
-            "工作时长",
-            "工作时长核查",
-            "公里数核查",
-            "路桥费核查",
-            "加班费核查",
-        ]
-        # 显示详细数据表格
-        with st.expander(f"📋 查看{chart_title}异常详细数据"):
-            # 只显示关键列
-            # display_cols = ['日期', '省', '市'] if '日期' in abnormal_df.columns else ['省', '市']
-            # display_cols.append(check_col)
+            with col1:
+                st.markdown(f"#### 时间段1")
+                if not abnormal_df1.empty:
+                    # 按省市分组统计
+                    stats1 = (
+                        abnormal_df1.groupby([group_col, check_col])
+                        .size()
+                        .reset_index(name="数量")
+                    )
 
-            st.dataframe(abnormal_df[default_columns], hide_index=True)
+                    categories1 = abnormal_df1[check_col].unique()
+
+                    fig1 = go.Figure()
+                    colors = px.colors.qualitative.Set3[: len(categories1)]
+
+                    for i, category in enumerate(categories1):
+                        cat_data = stats1[stats1[check_col] == category]
+                        if len(cat_data) > 0:
+                            fig1.add_trace(
+                                go.Bar(
+                                    name=category,
+                                    x=cat_data[group_col],
+                                    y=cat_data["数量"],
+                                    text=cat_data["数量"],
+                                    textposition="auto",
+                                    marker_color=colors[i],
+                                )
+                            )
+
+                    fig1.update_layout(
+                        title=f"{chart_title}异常分布",
+                        xaxis_title=group_col,
+                        yaxis_title="异常数量",
+                        barmode="group",
+                        plot_bgcolor="white",
+                        paper_bgcolor="white",
+                        xaxis_tickangle=-45,
+                        height=350,
+                    )
+                    st.plotly_chart(
+                        fig1,
+                        use_container_width=True,
+                        key=f"period1_{check_col}_{group_col}",
+                    )
+
+            with col2:
+                st.markdown(f"#### 时间段2")
+                if not abnormal_df2.empty:
+                    # 按省市分组统计
+                    stats2 = (
+                        abnormal_df2.groupby([group_col, check_col])
+                        .size()
+                        .reset_index(name="数量")
+                    )
+
+                    categories2 = abnormal_df2[check_col].unique()
+
+                    fig2 = go.Figure()
+                    colors = px.colors.qualitative.Set3[: len(categories2)]
+
+                    for i, category in enumerate(categories2):
+                        cat_data = stats2[stats2[check_col] == category]
+                        if len(cat_data) > 0:
+                            fig2.add_trace(
+                                go.Bar(
+                                    name=category,
+                                    x=cat_data[group_col],
+                                    y=cat_data["数量"],
+                                    text=cat_data["数量"],
+                                    textposition="auto",
+                                    marker_color=colors[i],
+                                )
+                            )
+
+                    fig2.update_layout(
+                        title=f"{chart_title}异常分布",
+                        xaxis_title=group_col,
+                        yaxis_title="异常数量",
+                        barmode="group",
+                        plot_bgcolor="white",
+                        paper_bgcolor="white",
+                        xaxis_tickangle=-45,
+                        height=350,
+                    )
+                    st.plotly_chart(
+                        fig2,
+                        use_container_width=True,
+                        key=f"period2_{check_col}_{group_col}",
+                    )
+                else:
+                    st.info("该时间段无异常记录")
+
+            # 合并时间段1和时间段2的数据
+            abnormal_df1["时间段"] = f"{start_date1} 至 {end_date1}"
+            abnormal_df2["时间段"] = f"{start_date2} 至 {end_date2}"
+            combined_abnormal_df = pd.concat([abnormal_df1, abnormal_df2])
+
+            with st.expander(f"{chart_title}异常详细数据 (合并显示)"):
+                st.dataframe(combined_abnormal_df.sort_index(), hide_index=True)
+
+            # 添加汇总对比表
+            st.markdown("#### 📊 汇总对比")
+            summary_data = []
+
+            # 时间段1汇总
+            if selected_city != "全部":
+                period1_by_region = (
+                    abnormal_df1.groupby("市").size().reset_index(name="时间段1异常数")
+                )
+            elif selected_province != "全部":
+                period1_by_region = (
+                    abnormal_df1.groupby("市").size().reset_index(name="时间段1异常数")
+                )
+            else:
+                period1_by_region = (
+                    abnormal_df1.groupby("省").size().reset_index(name="时间段1异常数")
+                )
+
+            # 时间段2汇总
+            if selected_city != "全部":
+                period2_by_region = (
+                    abnormal_df2.groupby("市").size().reset_index(name="时间段2异常数")
+                )
+            elif selected_province != "全部":
+                period2_by_region = (
+                    abnormal_df2.groupby("市").size().reset_index(name="时间段2异常数")
+                )
+            else:
+                period2_by_region = (
+                    abnormal_df2.groupby("省").size().reset_index(name="时间段2异常数")
+                )
+
+            # 合并汇总
+            if selected_city != "全部":
+                region_col = "市"
+            elif selected_province != "全部":
+                region_col = "市"
+            else:
+                region_col = "省"
+
+            summary_df = pd.merge(
+                period1_by_region.rename(columns={region_col: region_col}),
+                period2_by_region.rename(columns={region_col: region_col}),
+                on=region_col,
+                how="outer",
+            ).fillna(0)
+            summary_df["时间段1异常数"] = summary_df["时间段1异常数"].astype(int)
+            summary_df["时间段2异常数"] = summary_df["时间段2异常数"].astype(int)
+
+            st.dataframe(summary_df, use_container_width=True)
+
+        else:
+            # ========== 单时间段模式 ==========
+            # 筛选异常数据
+            abnormal_df = filtered_df[filtered_df[check_col] != "正常"].copy()
+
+            if abnormal_df.empty:
+                st.write(f"✅ 当前筛选条件下没有{chart_title}异常记录")
+                st.divider()
+                continue
+
+            # 按省份和异常类别分组统计
+            category_stats = (
+                abnormal_df.groupby([group_col, check_col])
+                .size()
+                .reset_index(name="数量")
+            )
+
+            # 获取所有异常类别
+            categories = abnormal_df[check_col].unique()
+
+            # 如果类别太多，可以合并其他类别
+            if len(categories) > 10:
+                main_categories = categories[:8]
+                other_df = abnormal_df[~abnormal_df[check_col].isin(main_categories)]
+                if len(other_df) > 0:
+                    categories = list(main_categories) + ["其他"]
+                    other_df = other_df.copy()
+                    other_df[check_col] = "其他"
+                    abnormal_df = pd.concat(
+                        [
+                            abnormal_df[abnormal_df[check_col].isin(main_categories)],
+                            other_df,
+                        ]
+                    )
+                    category_stats = (
+                        abnormal_df.groupby([group_col, check_col])
+                        .size()
+                        .reset_index(name="数量")
+                    )
+
+            # 使用函数创建图表
+            fig = create_category_bar_chart(
+                abnormal_df,
+                check_col,
+                group_col,
+                chart_title,
+                selected_province,
+                selected_city,
+                f"{start_date1} 至 {end_date1}",
+            )
+
+            # 显示图表
+            st.plotly_chart(fig, use_container_width=True)
+            default_columns = [
+                "日期",
+                "车牌号码",
+                "驾驶员名称",
+                "路桥费",
+                "停车费",
+                "加班费",
+                "开始时间",
+                "结束时间",
+                "行驶里程",
+                "开始公里数",
+                "结束公里数",
+                "小计",
+                "上传人姓名",
+                "供应商名称",
+                "省",
+                "市",
+                "一级项目名称",
+                "二级项目名称",
+                "工作时长",
+                "工作时长核查",
+                "公里数核查",
+                "路桥费核查",
+                "加班费核查",
+            ]
+            # 显示详细数据表格
+            with st.expander(f"📋 查看{chart_title}异常详细数据"):
+                st.dataframe(abnormal_df[default_columns], hide_index=True)
 
         st.divider()
 
@@ -790,7 +1209,7 @@ def main():
     # 页面头部
     create_header("车辆出勤分析", "数据核查与异常检测", "🚗")
 
-    # 创建主标签页：数据导入和数据看板
+    # 创建主标签页：数据导入、数据分析和时间对比
     tab1, tab2 = st.tabs(["📁 数据导入", "📈 数据分析"])
 
     # ========== Tab 1: 数据导入 ==========
@@ -810,12 +1229,12 @@ def main():
             st.markdown("---")
 
             # 异常占比分析
-            st.markdown("### 📈 异常占比分析")
+            st.markdown("### 📈 异常数据分析")
             abnormal_data_view()
             st.markdown("---")
 
             # 部门维度分析（合并到数据总览后面）
-            st.markdown("### 🔍 部门维度分析")
+            st.markdown("### 🔍 详细分析分析")
             display_province_category_analysis()
         else:
             st.info("请先导入数据以查看分析结果")
