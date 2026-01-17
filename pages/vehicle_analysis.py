@@ -289,11 +289,11 @@ def abnormal_data_view():
             data=[
                 go.Bar(
                     x=abnormal_df["核查项目"],
-                    y=abnormal_df["异常占比"],
-                    text=[f"{rate:.1f}%" for rate in abnormal_df["异常占比"]],
+                    y=abnormal_df["异常数量"],
+                    text=[f"{num}%" for num in abnormal_df["异常数量"]],
                     textposition="outside",
                     marker_color=px.colors.qualitative.Set3[: len(abnormal_df)],
-                    hovertemplate="%{x}<br>异常占比: %{y:.1f}%<extra></extra>",
+                    hovertemplate="%{y}",
                 )
             ]
         )
