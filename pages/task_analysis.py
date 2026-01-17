@@ -516,6 +516,9 @@ def main():
                     status_cols = ["待执行", "完成", "通过", "未知"]
                     trend_summary = trend_df.groupby("日期")[status_cols].sum()
                     st.dataframe(trend_summary, use_container_width=True)
+
+                with st.expander("#### 📋 详细数据预览", expanded=False):
+                    st.dataframe(trend_df, hide_index=True)                    
             else:
                 st.warning("没有符合条件的数据")
 
